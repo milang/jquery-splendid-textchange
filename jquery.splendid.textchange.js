@@ -5,11 +5,15 @@
  * (c) 2013 Ben Alpert, released under the MIT license
  */
 
+/*global jQuery: false */
+/*jslint browser: true, white: true, vars: true */
+
 (function($) {
+"use strict";
 
 var testNode = document.createElement("input");
-var isInputSupported = "oninput" in testNode && 
-    (!("documentMode" in document) || document.documentMode > 9);
+var isInputSupported = (testNode.oninput !== undefined &&
+    ((document.documentMode || 100) > 9));
 
 var hasInputCapabilities = function(elem) {
     // The HTML5 spec lists many more types than `text` and `password` on
@@ -25,6 +29,7 @@ var hasInputCapabilities = function(elem) {
 var activeElement = null;
 var activeElementValue = null;
 var activeElementValueProp = null;
+var activeElementValueOverride = false; // track whether "activeElement.value" property was overridden in "startWatching" so that it can be restored in "stopWatching"
 
 /**
  * (For old IE.) Replacement getter/setter for the `value` property that
@@ -41,6 +46,20 @@ var newValueProp =  {
 };
 
 /**
+ * (For old IE.) Handles a propertychange event, sending a textChange event if
+ * the value of the active element has changed.
+ */
+var handlePropertyChange = function(nativeEvent) {
+    if (nativeEvent.propertyName !== "value") { return; }
+
+    var value = nativeEvent.srcElement.value;
+    if (value === activeElementValue) { return; }
+    activeElementValue = value;
+
+    $(activeElement).trigger("textchange");
+};
+
+/**
  * (For old IE.) Starts tracking propertychange events on the passed-in element
  * and override the value property so that we can distinguish user events from
  * value changes in JS.
@@ -48,10 +67,14 @@ var newValueProp =  {
 var startWatching = function(target) {
     activeElement = target;
     activeElementValue = target.value;
-    activeElementValueProp = Object.getOwnPropertyDescriptor(
-            target.constructor.prototype, "value");
 
-    Object.defineProperty(activeElement, "value", newValueProp);
+    if (target.constructor && target.constructor.prototype) { // target.constructor is undefined in quirks mode
+        activeElementValueProp = Object.getOwnPropertyDescriptor(
+            target.constructor.prototype, "value");
+        Object.defineProperty(activeElement, "value", newValueProp);
+        activeElementValueOverride = true;
+    }
+
     activeElement.attachEvent("onpropertychange", handlePropertyChange);
 };
 
@@ -60,29 +83,18 @@ var startWatching = function(target) {
  * element, if any exists.
  */
 var stopWatching = function() {
-  if (!activeElement) return;
+    if (!activeElement) { return; }
 
-  // delete restores the original property definition
-  delete activeElement.value;
-  activeElement.detachEvent("onpropertychange", handlePropertyChange);
+    if (activeElementValueOverride) {
+        // delete restores the original property definition
+        delete activeElement.value;
+        activeElementValueOverride = false;
+    }
+    activeElement.detachEvent("onpropertychange", handlePropertyChange);
 
-  activeElement = null;
-  activeElementValue = null;
-  activeElementValueProp = null;
-};
-
-/**
- * (For old IE.) Handles a propertychange event, sending a textChange event if
- * the value of the active element has changed.
- */
-var handlePropertyChange = function(nativeEvent) {
-    if (nativeEvent.propertyName !== "value") return;
-
-    var value = nativeEvent.srcElement.value;
-    if (value === activeElementValue) return;
-    activeElementValue = value;
-
-    $(activeElement).trigger("textchange");
+    activeElement = null;
+    activeElementValue = null;
+    activeElementValueProp = null;
 };
 
 if (isInputSupported) {
@@ -119,9 +131,7 @@ if (isInputSupported) {
             }
         })
 
-        .on("focusout", function() {
-            stopWatching();
-        })
+        .on("focusout", stopWatching)
 
         .on("selectionchange keyup keydown", function() {
             // On the selectionchange event, e.target is just document which
@@ -142,4 +152,4 @@ if (isInputSupported) {
         });
 }
 
-})(jQuery);
+}(jQuery));
